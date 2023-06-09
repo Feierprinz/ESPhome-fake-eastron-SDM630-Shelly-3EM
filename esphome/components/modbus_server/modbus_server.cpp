@@ -21,7 +21,7 @@ void ModbusServer::set_re_pin(GPIOPin *re_pin) {
       re_pin_ = re_pin;
       re_pin_->setup();
       re_pin_->digital_write(LOW);
-//      ESP_LOGD(TAG, "set_re_pin(): re_pin_ -> LOW");
+      ESP_LOGD(TAG, "set_re_pin(): re_pin_ -> LOW");
     }
 }
 
@@ -30,7 +30,7 @@ void ModbusServer::set_de_pin(GPIOPin *de_pin) {
     de_pin_ = de_pin;
     de_pin_->setup();
     de_pin_->digital_write(LOW);
-//    ESP_LOGD(TAG, "set_de_pin(): de_pin_ -> LOW");
+    ESP_LOGD(TAG, "set_de_pin(): de_pin_ -> LOW");
   }
 }
 
@@ -78,10 +78,10 @@ size_t ModbusServer::write(uint8_t data) {
     if (( (re_pin_ != nullptr) || (de_pin_ != nullptr) ) && !sending) {
         if (re_pin_ != nullptr)
           re_pin_->digital_write(HIGH);
-//          ESP_LOGV(TAG, "write(): re_pin_ -> HIGH");
+          ESP_LOGV(TAG, "write(): re_pin_ -> HIGH");
         if (de_pin_ != nullptr)
           de_pin_->digital_write(HIGH);
-//          ESP_LOGV(TAG, "write(): de_pin_ -> HIGH");
+          ESP_LOGV(TAG, "write(): de_pin_ -> HIGH");
     sending = true;
   }
   return uart::UARTDevice::write(data);
@@ -94,10 +94,10 @@ void ModbusServer::flush() {
     if (( (re_pin_ != nullptr) || (de_pin_ != nullptr) ) && sending) {
         if (re_pin_ != nullptr)
           re_pin_->digital_write(LOW);
-//          ESP_LOGV(TAG, "flush(): re_pin_ -> LOW");
+          ESP_LOGV(TAG, "flush(): re_pin_ -> LOW");
         if (de_pin_ != nullptr)
           de_pin_->digital_write(LOW);
-//          ESP_LOGV(TAG, "flush(): de_pin_ -> LOW");
+          ESP_LOGV(TAG, "flush(): de_pin_ -> LOW");
     sending = false;
   }
 }
