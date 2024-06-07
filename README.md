@@ -1,423 +1,68 @@
-** This is a work in progress **
+## Goal
 
-## Working
-ESPhome acting as a Slave/Client/Server that can be polled by a master (e.g. a solar inverter) and delivers IREGs and HREGs which can be controlled arbitratily, I'm planning to use the values from my Shelly EM, however I've included a return value examples that allows you to set the values directly from HomeAssistant for anyone using that.
+This project allows you to provide live data from a [Shelly Pro 3 EM](https://www.shelly.com/en-us/products/shop/shelly-pro-3-em) smart meter to a solar inverter that expects an [Eastron SDM630](https://www.eastroneurope.com/products/view/sdm630modbus).
 
-## Next steps
-Connect it to an inverter, enable export control in the inverter menu, and monitor the requests. I've just moved house and my inverter is in a box, so id anyone wants to try this and give me some feedback I would be greatful.
+## How is this working?
 
+The project provides an ESPhome component acting as a Slave/Client/Server that can be polled by a master (e.g. a solar inverter) via Modbus RTU. It behaves as much as possible like the Eastron SDM630 while fetching the actual data from the Shelly smart meter.
 
+### How exactly?
 
-``` yaml
-esphome:
-  name: sdm230-test04
-  friendly_name: sdm230-test04
+* On boot, the ESPhome starts a Modbus slave on address 2. This is where Growatt expects to find the vanilla Eastron SDM630 Modbus V2. It registers several input registers that can be queried by a Modbus master.
+* At 1s intervals, it makes a HTTP GET request to the Shelly smart meter, fetching live data.
+* The JSON-data is parsed, converted to IEEE-754 float and written to the matching registers.
+* The inverter queries the Modbus slave several times a second, fetching the input registers in various groups.
 
-esp32:
-  board: esp32dev
-  framework:
-    type: arduino
+## Why?
 
-# Enable logging
-logger:
+I use a Growatt MIN 4200TL-XH hybrid inverter. The inverter only supports two types of smart meters, which must be connected via RS485:
 
-# Enable Home Assistant API
-api:
-  encryption:
-    key: "xxxxxx"
+* Eastron SDM630 Modbus V2 or V3
+* CHINT smart meter from Growatt
 
-ota:
-  password: "xxxxxx"
+In my case the inverter is installed in a different room relatively far away from the grid connection. Having a two-wire RS485 connection running through the house is not an option. Also, I have a Shelly Pro 3EM smart meter installed. 
 
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+Since the Shelly is LAN-connected, this simple ESPhome project bridges manufacturer, distance, physical layer and protocol.
 
-  # Enable fallback hotspot (captive portal) in case wifi connection fails
-  ap:
-    ssid: "Sdm230-Test04 Fallback Hotspot"
-    password: "xxxxxx"
+## Installation
 
-captive_portal:
+1. Connect ESP32 dev board to RS485 module.
+2. Connect RS485 A and B connectors to pins 5 (A) and 6 (B) of the Growatt SYS COM port.
+3. Build and flash the firmware based on the [sample ESPhome config](./fake-eastron.yaml).
+4. Enable meter-reading in Growatt **TODO: explain how**
+5. Power-cycle the inverter completely.
 
-external_components:
-  - source: github://That-Dude/esphome-fake-eastron-SDM230@master
-    refresh: 60s
-    components:
-      - modbus_server
+**TODO: fritzing or image from breadboard**
 
-uart:
-  - id: intmodbus
-    tx_pin: 17 # DI WHITE wire
-    rx_pin: 16 # RO BLUE  wire
-    baud_rate: 9600
-    stop_bits: 1
-    data_bits: 8
-    parity: NONE
-    debug:
-      direction: BOTH
+![Image](images/growatt-syscom.png)
+![Image](images/IMG_9971.JPG)
+![Image](images/IMG_9972.JPG)
 
-modbus_server:
-  - id: modbuserver
-    uart_id: intmodbus
-    address: 1 # slave address
-    #  - I used this module which reqired pins below http://domoticx.com/wp-content/uploads/2018/01/RS485-module-shield.jpg
-    re_pin: GPIO19 # optional
-    de_pin: GPIO18 # optional
+### Modbus address
 
-    # holding_registers: # I don't think these are required for my purposes
-    #   - start_address: 79 # starting register range
-    #     default: 82 # default value for all those registers
-    #     number: 2 # number of registers in the range
-    #     on_read: | # called whenever a register in the range is read
-    #       // 'address' contains the requested register address
-    #       // 'value' contains the stored register value 
-    #       ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-    #       return value; // you can return the stored value or something else.
+Growatt expects different smart meters at different slave addresses:
 
-    input_registers:
-        # I've implimented all of the regs found in this PDF:
-        # https://www.eastroneurope.com/images/uploads/products/protocol/SDM630_MODBUS_Protocol.pdf
+| Meter | Phases | Slave address |
+|---------|----------|-----------------|
+| Eastron SDM230 | 1 | 1 |
+| Eastron SDM630 v2 | 3 | 2 |
+| Eastron SDM630 v3 | 3 | 3 |
 
-        # However, most inverters are likely to only request (or only use) certain values.
-        # E.g. My Growatt TLX3600 modbus master connected to mobus port B, requests first 14 regs
-        # initially (01 04 00 00 00 0E 71 CE)
+Eastron SDM630 **v3** is a custom version with firmware influenced by Growatt. My understanding is that it allows a higher rate of request/responses, resulting in finer tracking of power demands.
 
-        - start_address: 00
-          default: 240 # Line to neutral Volts
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 01
-          default: 035 # Line to neutral Volts
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-            
-        - start_address: 06
-          default: 0 # current Amps
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 07
-          default: 2 # current Amps
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
+## External documentation & tools
 
-        - start_address: 12
-          default: 52 # Active Power Watts
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-        - start_address: 13
-          default: 30 # Active Power Watts
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
+* [Eastron SDM630 Modbus Protocol](docs/SDM630-Modbus_Protocol.pdf)
+* [Shelly Pro 3 EM](https://shelly-api-docs.shelly.cloud/gen2/Devices/Gen2/ShellyPro3EM)
+* [Growatt Modbus RTU Protocol](docs/Growatt-Inverter-Modbus-RTU-Protocol-II-V1-24-English-new.pdf)
+* [ESP32 NodeMCU pinout](docs/ESP-32_NodeMCU_Developmentboard_Pinout.pdf)
+* [IEEE-754 Floating Point Converter](https://www.h-schmidt.net/FloatConverter/IEEE754.html)
+* [Online Modbus Parse](https://rapidscada.net/modbus/)
+* Python tool to query an Eastron; for testing/verification: [https://github.com/nmakel/sdm_modbus](https://github.com/nmakel/sdm_modbus)
 
-        # Request 1 ends here -----------------------------------------------------------------
+## Some thoughts
 
-
-
-        - start_address: 18
-          default: 52 # Apparent power VoltAmps
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-        - start_address: 19
-          default: 52 # Apparent power VoltAmps
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 24
-          default: 0 # Reactive power VAr
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 25
-          default: 0003 # Reactive power VAr
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 30
-          default: 0 # Power factor
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 31
-          default: 0 # Power factor
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 36
-          default: 0 # Phase angle Degree - this is a guess??? But I don't think it's used anyway
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 37
-          default: 0 # Phase angle Degree - this is a guess??? But I don't think it's used anyway
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 70
-          default: 50 # Frequency Hz
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-        - start_address: 71
-          default: 0 # Frequency Hz
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 72
-          default: 0 # Import active energy kwh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-        - start_address: 73
-          default: 0034 # Import active energy kwh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 74
-          default: 0 # Export active energy kwh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-        - start_address: 75
-          default: 0 # Export active energy kwh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else. 
-
-        - start_address: 76
-          default: 0 # Import reactive energy kvarh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 77
-          default: 034 # Import reactive energy kvarh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 78
-          default: 0 # Export reactive energy kvarh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 79
-          default: 0 # Export reactive energy kvarh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 84
-          default: 0 # Total system power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 85
-          default: 0 # Total system power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 86
-          default: 200 #  Maximum total system power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 87
-          default: 0 # Maximum total system power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 88
-          default: 200 #  Current system positive power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 89
-          default: 0 # Current system positive power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 90
-          default: 200 #  Maximum system positive power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 91
-          default: 0 # Maximum system positive power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 92
-          default: 0 #  Current system reverse power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 93
-          default: 0 # Current system reverse power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 94
-          default: 0 #  Maximum system reverse power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 95
-          default: 0 # Maximum system reverse power demand W
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.   
-
-        - start_address: 258
-          default: 0 #  Current demand Amps
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 259
-          default: 0 # Current demand Amps
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.  
-
-        - start_address: 264
-          default: 0 #  Maximum Current demand Amps
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 265
-          default: 0 # Maximum Current demand Amps
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.  
-
-        - start_address: 342
-          default: 0 #  Total active energy kwh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 343
-          default: 0 #  Total active energy kwh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.  
-
-        - start_address: 344
-          default: 0 #  Total reactive energy kvarh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 345
-          default: 0 #  Total reactive energy kvarh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.  
-
-        - start_address: 384
-          default: 0 #  Current resettable total active energy kwh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 385
-          default: 0 #  Current resettable total active energy kwh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.  
-
-        - start_address: 386
-          default: 0 #  Current resettable total reactive energy kvarh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.
-        - start_address: 387
-          default: 0 #  Current resettable total reactive energy kvarh
-          number: 1
-          on_read:
-            ESP_LOGI("ON_READ", "This is a lambda. address=%d, value=%d", address, value);
-            return value; // you can return the stored value or something else.  
-
-            # example return based on the value of tspd number template below
-            # return id(tspd).state; // you can return the stored value or something else.
-
-
-# Creates a number slider in Home Assistant that allows you to set the value of a register
-number:
-  - platform: template
-    name: "Total system power demand W"
-    id: tspd
-    optimistic: true
-    min_value: 0 # this is the default on boot
-    max_value: 10000
-    step: 100
-```
-
-## The module I used
-![RS485-module-shield](https://user-images.githubusercontent.com/6509533/230406441-bd38df26-a72c-4a37-88c1-631ec2d2cfe7.jpg)
-
-## Inverter modbus connection
-Growatt MIN 3600TL-X
-
-![Screenshot 2023-04-07 at 13 53 21](https://user-images.githubusercontent.com/6509533/230619695-b52cfe74-9f23-4acf-a55b-52fefa3c8346.jpg)
+* I want to have as little elements involved in this as possible. Other projects use an MQTT broker between smart meter and ESP, which could become unavailable. Therefore I use direct communication between the two.
+* Shelly always reports the power factor as a positive value. Eastron reports it as negative when exporting power. Therefore I'm calculating the powerfactor myself, rather than using the values provided by the Shelly.
+* I would prefer to use Modbus TCP to query the Shelly. Not sure if ESPhome supports this.
+* The inverter is constantly adjusting the charge/discharge rate of the battery, trying to avoid importing power. My observations show that the inverter "overshoots" by ~50W to achieve this. As a result, the installation is constantly exporting a little bit of power to the grid. In order to avoid this, I'm adjusting the reported values for active and aparent power by 20W per phase. This balances the import/export at around -5..5W.
