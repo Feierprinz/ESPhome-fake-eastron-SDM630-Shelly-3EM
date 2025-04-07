@@ -1,3 +1,33 @@
+Projektbeschreibung / Project Description
+Deutsch:
+Dieses Projekt emuliert einen Eastron SDM630 Energiezähler über RS485/Modbus mit Hilfe von ESPHome und einem Shelly 3EM. Es stellt die vom Shelly gemessenen Strom- und Energiewerte so bereit, als kämen sie von einem echten SDM630. Ideal für Systeme oder Software, die Daten von einem SDM630 erwarten, aber stattdessen den Shelly 3EM verwenden sollen.
+
+Hauptfunktionen:
+
+Emuliert die Modbus-Register eines SDM630.
+
+Nutzt die realen Messwerte vom Shelly 3EM über ESPHome.
+
+Perfekt zur Integration in Hausautomationen oder Energiemonitoring-Systeme, die auf den SDM630 ausgelegt sind.
+________________________________________
+English:
+This project emulates an Eastron SDM630 energy meter over RS485/Modbus using ESPHome and a Shelly 3EM. It presents the power and energy data measured by the Shelly as if it were coming from a real SDM630. Ideal for systems or software that expect an SDM630 but should actually use a Shelly 3EM instead.
+
+Key Features:
+
+Emulates the Modbus registers of an SDM630.
+
+Uses real-time readings from the Shelly 3EM via ESPHome.
+
+Perfect for integration into home automation or energy monitoring systems designed for the SDM630.
+# Original Github-Projekt: https://github.com/hankipanky/esphome-fake-eastron-SDM630
+# Original Yaml: https://github.com/hankipanky/esphome-fake-eastron-SDM630/blob/master/fake-eastron.yaml
+# Original Modbus - Dateien: https://github.com/hankipanky/esphome-fake-eastron-SDM630/blob/master/esphome/components/modbus_server/modbus_server.h und 
+# https://github.com/hankipanky/esphome-fake-eastron-SDM630/blob/master/esphome/components/modbus_server/modbus_server.cpp
+# Original Github basiert auf ESPHome 2024.5 und einem Shelly 3EM Pro, dieses Projekt hier auf ESPHome 2025.3.3 und einem Shelly 3EM
+# Folgender ESP wird verwendet: https://www.amazon.de/dp/B0D86Q1RJ2
+# Folgender RS485-Adapter: https://www.amazon.de/dp/B099DRKBGQ
+##################################
 ## Goal
 
 This project allows you to provide live data from a [Shelly Pro 3 EM](https://www.shelly.com/en-us/products/shop/shelly-pro-3-em) smart meter to a solar inverter that expects an [Eastron SDM630](https://www.eastroneurope.com/products/view/sdm630modbus).
