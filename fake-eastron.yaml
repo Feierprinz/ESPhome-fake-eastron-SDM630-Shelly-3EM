@@ -1,252 +1,525 @@
+# Original Github-Projekt: https://github.com/hankipanky/esphome-fake-eastron-SDM630
+# Original Yaml: https://github.com/hankipanky/esphome-fake-eastron-SDM630/blob/master/fake-eastron.yaml
+# Original Modbus - Dateien: https://github.com/hankipanky/esphome-fake-eastron-SDM630/blob/master/esphome/components/modbus_server/modbus_server.h und 
+# https://github.com/hankipanky/esphome-fake-eastron-SDM630/blob/master/esphome/components/modbus_server/modbus_server.cpp
+# Original Github basiert auf ESPHome 2024.5 und einem Shelly 3EM Pro, dieses Projekt hier auf ESPHome 2025.3.3 und einem Shelly 3EM
+# Folgender ESP wird verwendet: https://www.amazon.de/dp/B0D86Q1RJ2
+# Folgender RS485-Adapter: https://www.amazon.de/dp/B099DRKBGQ
+
+substitutions:
+  friendly_name: "Shelly 3EM"
+  shelly_ip: "192.168.0.6"
+  modbus_slave_id: "2"
+
 esphome:
-  name: energy-meter-bridge
-  friendly_name: Energy meter bridge
+  name: shelly3em-sdm630-emulator
+  friendly_name: "${friendly_name}"
+  min_version: 2025.3.3
+  platformio_options:
+    build_flags:
+      -DCORE_DEBUG_LEVEL=0
+      -O3
+      -fno-exceptions
+      -Wno-unused-variable
 
 esp32:
-  board: wemos_d1_mini32
+  board: nodemcu-32s
   framework:
     type: arduino
 
-# Enable logging
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [modbus_server]
+
+globals:
+  - id: modbus_send_mode
+    type: std::string
+    restore_value: yes
+    initial_value: '"Alles senden"'
+  - id: modbus_error_counter
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: uart_timeout_counter
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: last_valid_response
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: stored_shelly_ip
+    type: std::string
+    restore_value: yes
+    initial_value: '"${shelly_ip}"'
+  - id: persistent_http
+    type: HTTPClient
+    restore_value: no
+  - id: persistent_client
+    type: WiFiClient
+    restore_value: no
+  - id: last_v1
+    type: float
+    initial_value: '0.0'
+  - id: last_v2
+    type: float
+    initial_value: '0.0'
+  - id: last_v3
+    type: float
+    initial_value: '0.0'
+  - id: last_c1
+    type: float
+    initial_value: '0.0'
+  - id: last_c2
+    type: float
+    initial_value: '0.0'
+  - id: last_c3
+    type: float
+    initial_value: '0.0'
+  - id: last_p1
+    type: float
+    initial_value: '0.0'
+  - id: last_p2
+    type: float
+    initial_value: '0.0'
+  - id: last_p3
+    type: float
+    initial_value: '0.0'
+  - id: last_freq
+    type: float
+    initial_value: '0.0'
+  - id: last_total_energy
+    type: float
+    initial_value: '0.0'
+  - id: last_total_power
+    type: float
+    initial_value: '0.0'
+
+web_server:
+  port: 80
+  version: 2
+
 logger:
-  level: INFO
-
-# Enable Home Assistant API
-api:
-  encryption:
-    key: "..."
-
-ota:
-  password: "..."
+  level: ERROR
+  baud_rate: 0
 
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-
-  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  fast_connect: true
+  power_save_mode: none
   ap:
-    ssid: "Fallback Hotspot"
-    password: "efdOuVuDJPPo"
+    ssid: "${friendly_name} Fallback"
+    password: ""
+    ap_timeout: 5min
 
 captive_portal:
 
-time:
-  - platform: homeassistant
+api:
+#  encryption:
+#    key: "DEIN API KEY von HomeAssistant"
+  services:
+    - service: modbus_response_received
+      then:
+        - lambda: |-
+            id(last_valid_response) = millis();
+    - service: modbus_error_occurred
+      then:
+        - lambda: |-
+            id(modbus_error_counter) += 1;
+  id: api_error
 
-external_components:
-  - source: github://hankipanky/esphome-fake-eastron-SDM630
-    refresh: 60s
-    components:
-      - modbus_server
+ota:
+  - platform: esphome
 
 uart:
   - id: intmodbus
-    tx_pin: 17 # brown
-    rx_pin: 16 # white
+    tx_pin: 17
+    rx_pin: 16
     baud_rate: 9600
     stop_bits: 1
     data_bits: 8
     parity: NONE
-    debug:
-      direction: BOTH
-
-http_request:
-  id: http_request_data
-  useragent: esphome/meter-bridge
-  timeout: 10s
 
 modbus_server:
   - id: modbusserver
     uart_id: intmodbus
-    address: 2 # slave address
-#    re_pin: 18 # enable if needed
-#    de_pin: 5 # enable if needed
+    address: ${modbus_slave_id}
     input_registers:
-      - start_address: 00
+      - start_address: 0x0000
         default: 0
         number: 72
-        on_read: |
-          ESP_LOGD("read-modbus", "Returning register address=%d, value=0x%04x", address, value);
+        on_read: |-
+          ESP_LOGD("modbus", "Register 0x%04X read: 0x%04X", address, value);
+          id(last_valid_response) = millis();
           return value;
-      - start_address: 200
+      - start_address: 0x00C8
         default: 0
         number: 6
-        on_read: |
-          ESP_LOGD("read-modbus", "Returning unsupported register address=%d, value=0x%04x", address, value);
+        on_read: |-
+          ESP_LOGD("modbus", "Invalid register access: 0x%04X", address);
+          id(modbus_error_counter) += 1;
           return value;
-      - start_address: 342
-        default: 0
-        number: 2
-        on_read: |
-          ESP_LOGD("read-modbus", "Returning register address=%d, value=0x%04x", address, value);
-          return value;
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "ESP32 IP Adresse"
+    ssid:
+      name: "WLAN SSID"
+      entity_category: diagnostic
+  - platform: template
+    name: "Shelly IP-Adresse"
+    id: shelly_ip_display
+    icon: "mdi:ip-network"
+    entity_category: config
+    lambda: |-
+      return id(stored_shelly_ip);
+  - platform: template
+    name: "Modbus Status"
+    id: modbus_status
+    icon: "mdi:information-outline"
+
+number:
+  - platform: template
+    name: "Shelly IP Oktett 1"
+    id: shelly_ip_oct1
+    icon: "mdi:ip-network"
+    entity_category: config
+    min_value: 0
+    max_value: 255
+    step: 1
+    mode: box
+    optimistic: true
+    initial_value: 192.0
+    set_action:
+      - lambda: |-
+          std::string ip = id(stored_shelly_ip);
+          size_t pos1 = ip.find('.');
+          std::string new_ip = to_string(int(x)) + ip.substr(pos1);
+          id(stored_shelly_ip) = new_ip;
+          id(shelly_ip_display).publish_state(new_ip);
+          id(modbus_status).publish_state("IP aktualisiert - Neustart erforderlich");
+  - platform: template
+    name: "Shelly IP Oktett 2"
+    id: shelly_ip_oct2
+    icon: "mdi:ip-network"
+    entity_category: config
+    min_value: 0
+    max_value: 255
+    step: 1
+    mode: box
+    optimistic: true
+    initial_value: 168.0
+    set_action:
+      - lambda: |-
+          std::string ip = id(stored_shelly_ip);
+          size_t pos1 = ip.find('.');
+          size_t pos2 = ip.find('.', pos1+1);
+          std::string new_ip = ip.substr(0, pos1+1) + to_string(int(x)) + ip.substr(pos2);
+          id(stored_shelly_ip) = new_ip;
+          id(shelly_ip_display).publish_state(new_ip);
+          id(modbus_status).publish_state("IP aktualisiert - Neustart erforderlich");
+  - platform: template
+    name: "Shelly IP Oktett 3"
+    id: shelly_ip_oct3
+    icon: "mdi:ip-network"
+    entity_category: config
+    min_value: 0
+    max_value: 255
+    step: 1
+    mode: box
+    optimistic: true
+    initial_value: 0.0
+    set_action:
+      - lambda: |-
+          std::string ip = id(stored_shelly_ip);
+          size_t pos2 = ip.rfind('.');
+          size_t pos3 = ip.rfind('.', pos2-1);
+          std::string new_ip = ip.substr(0, pos3+1) + to_string(int(x)) + ip.substr(pos2);
+          id(stored_shelly_ip) = new_ip;
+          id(shelly_ip_display).publish_state(new_ip);
+          id(modbus_status).publish_state("IP aktualisiert - Neustart erforderlich");
+  - platform: template
+    name: "Shelly IP Oktett 4"
+    id: shelly_ip_oct4
+    icon: "mdi:ip-network"
+    entity_category: config
+    min_value: 0
+    max_value: 255
+    step: 1
+    mode: box
+    optimistic: true
+    initial_value: 6.0
+    set_action:
+      - lambda: |-
+          std::string ip = id(stored_shelly_ip);
+          size_t pos = ip.rfind('.');
+          std::string new_ip = ip.substr(0, pos+1) + to_string(int(x));
+          id(stored_shelly_ip) = new_ip;
+          id(shelly_ip_display).publish_state(new_ip);
+          id(modbus_status).publish_state("IP aktualisiert - Neustart erforderlich");
+
+switch:
+  - platform: template
+    name: "Einstellungen speichern"
+    id: save_settings
+    icon: "mdi:content-save"
+    entity_category: config
+    lambda: |-
+      return false;
+    turn_on_action:
+      - lambda: |-
+          id(modbus_status).publish_state("Einstellungen werden nach Neustart aktiv");
+          delay(250);
+          id(save_settings).turn_off();
+  - platform: factory_reset
+    name: "Werksreset"
+    entity_category: config
+    icon: "mdi:alert"
+  - platform: restart
+    name: "Restart"
+    entity_category: config
+  - platform: template
+    name: "UART Reset"
+    id: uart_reset_switch
+    icon: "mdi:restart"
+    entity_category: diagnostic
+    lambda: |-
+      return false;
+    turn_on_action:
+      - lambda: |-
+          id(intmodbus).load_settings();
+          delay(100);
+          id(watchdog_active).publish_state(false);
+          delay(250);
+          id(uart_reset_switch).turn_off();
+
+select:
+  - platform: template
+    name: "Modbus Sendemodus"
+    id: modbus_send_mode_select
+    icon: "mdi:transfer"
+    options:
+      - "Alles senden"
+      - "Nur Geänderte Werte"
+    entity_category: config
+    lambda: |-
+      return id(modbus_send_mode);
+    set_action:
+      then:
+        - lambda: |-
+            id(modbus_send_mode) = x;
+            id(modbus_status).publish_state("Sendemodus geändert - Speichern & Neustart benötigt");
+
+binary_sensor:
+  - platform: status
+    name: "Status"
+    entity_category: diagnostic
+  - platform: template
+    name: "Modbus Watchdog Active"
+    id: watchdog_active
+    device_class: problem
+    entity_category: diagnostic
+    icon: "mdi:alert"
+
+sensor:
+  - platform: template
+    name: "Frequenz"
+    id: frequency
+    unit_of_measurement: "Hz"
+    device_class: "frequency"
+    accuracy_decimals: 1
+  - platform: template
+    name: "Gesamtenergie"
+    id: total_energy
+    unit_of_measurement: "kWh"
+    device_class: "energy"
+    accuracy_decimals: 3
+  - platform: template
+    name: "Spannung L1"
+    id: voltage_l1
+    unit_of_measurement: "V"
+    device_class: "voltage"
+    accuracy_decimals: 1
+  - platform: template
+    name: "Spannung L2"
+    id: voltage_l2
+    unit_of_measurement: "V"
+    device_class: "voltage"
+    accuracy_decimals: 1
+  - platform: template
+    name: "Spannung L3"
+    id: voltage_l3
+    unit_of_measurement: "V"
+    device_class: "voltage"
+    accuracy_decimals: 1
+  - platform: template
+    name: "Strom L1"
+    id: current_l1
+    unit_of_measurement: "A"
+    device_class: "current"
+    accuracy_decimals: 3
+  - platform: template
+    name: "Strom L2"
+    id: current_l2
+    unit_of_measurement: "A"
+    device_class: "current"
+    accuracy_decimals: 3
+  - platform: template
+    name: "Strom L3"
+    id: current_l3
+    unit_of_measurement: "A"
+    device_class: "current"
+    accuracy_decimals: 3
+  - platform: template
+    name: "Wirkleistung L1"
+    id: active_power_l1
+    unit_of_measurement: "W"
+    device_class: "power"
+    accuracy_decimals: 1
+  - platform: template
+    name: "Wirkleistung L2"
+    id: active_power_l2
+    unit_of_measurement: "W"
+    device_class: "power"
+    accuracy_decimals: 1
+  - platform: template
+    name: "Wirkleistung L3"
+    id: active_power_l3
+    unit_of_measurement: "W"
+    device_class: "power"
+    accuracy_decimals: 1
+  - platform: template
+    name: "Wirkleistung L1+L2+L3"
+    id: total_active_power
+    unit_of_measurement: "W"
+    device_class: "power"
+    accuracy_decimals: 1
+    lambda: |-
+      return id(last_total_power);
+  - platform: template
+    name: "Modbus CRC Errors"
+    id: modbus_crc_errors
+    icon: "mdi:close-network"
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      return id(modbus_error_counter);
+  - platform: template
+    name: "Modbus Timeouts"
+    id: modbus_timeouts
+    icon: "mdi:timer-off"
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      return id(uart_timeout_counter);
+
+http_request:
+  id: http_request_data
+  useragent: esphome/shelly-3em
+  timeout: 10s
+  verify_ssl: false
 
 interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          if (id(last_valid_response) > 0 && 
+              (millis() - id(last_valid_response)) > 120000) {
+            id(uart_timeout_counter) += 1;
+            id(watchdog_active).publish_state(true);
+            id(intmodbus).load_settings();
+            delay(100);
+            id(last_valid_response) = millis();
+            id(watchdog_active).publish_state(false);
+          }
+  
   - interval: 1s
     then:
-      - http_request.get:
-          url: http://shellypro3em/rpc/EM.GetStatus?id=0
-          on_response: 
-            then:
-              - lambda: |-
-                  json::parse_json(id(http_request_data).get_string(), [](JsonObject root) {
-                      // setting modbusserver registers
-                      // use https://www.h-schmidt.net/FloatConverter/IEEE754.html to doublecheck conversions
+      - lambda: |-
+          HTTPClient& http = id(persistent_http);
+          WiFiClient& client = id(persistent_client);
+          if (!http.connected()) {
+            std::string url = "http://" + id(stored_shelly_ip) + "/status";
+            if (!http.begin(client, url.c_str())) {
+              return;
+            }
+          }
 
-                      // convert from float to 2 uint16_t. 
-                      union 
-                      {
-                      uint16_t x_int[2];
-                      float x_f;
-                      } u;
+          int httpCode = http.GET();
+          if (httpCode != HTTP_CODE_OK) {
+            http.end();
+            return;
+          }
 
-                      // register 0: phase A voltage
-                      u.x_f = root["a_voltage"];
-                      id(modbusserver)->write_input_register(0, u.x_int[1]);
-                      id(modbusserver)->write_input_register(1, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase A voltage %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 2: phase B voltage
-                      u.x_f = root["b_voltage"];
-                      id(modbusserver)->write_input_register(2, u.x_int[1]);
-                      id(modbusserver)->write_input_register(3, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase B voltage %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 4: phase C voltage
-                      u.x_f = root["c_voltage"];
-                      id(modbusserver)->write_input_register(4, u.x_int[1]);
-                      id(modbusserver)->write_input_register(5, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase C voltage %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
+          DynamicJsonDocument doc(2048);
+          DeserializationError error = deserializeJson(doc, http.getStream());
+          if (error) {
+            http.end();
+            return;
+          }
 
-                      // register 6: phase A current
-                      u.x_f = root["a_current"];
-                      id(modbusserver)->write_input_register(6, u.x_int[1]);
-                      id(modbusserver)->write_input_register(7, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase A current %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 8: phase B current
-                      u.x_f = root["b_current"];
-                      id(modbusserver)->write_input_register(8, u.x_int[1]);
-                      id(modbusserver)->write_input_register(9, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase B current %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 10: phase C current
-                      u.x_f = root["c_current"];
-                      id(modbusserver)->write_input_register(10, u.x_int[1]);
-                      id(modbusserver)->write_input_register(11, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase C current %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
+          JsonArray emeters = doc["emeters"];
+          if (!emeters || emeters.size() < 3) {
+            http.end();
+            return;
+          }
 
-                      // register 12: phase A power
-                      u.x_f = root["a_act_power"];
-                      u.x_f = u.x_f - 20; // adjust by 20W
-                      id(modbusserver)->write_input_register(12, u.x_int[1]);
-                      id(modbusserver)->write_input_register(13, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase A power %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 14: phase B power
-                      u.x_f = root["b_act_power"];
-                      u.x_f = u.x_f - 20; // adjust by 20W
-                      id(modbusserver)->write_input_register(14, u.x_int[1]);
-                      id(modbusserver)->write_input_register(15, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase B power %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 16: phase C power
-                      u.x_f = root["c_act_power"];
-                      u.x_f = u.x_f - 20; // adjust by 20W
-                      id(modbusserver)->write_input_register(16, u.x_int[1]);
-                      id(modbusserver)->write_input_register(17, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase C power %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      
-                      // register 18: phase A apparent power
-                      u.x_f = root["a_aprt_power"];
-                      u.x_f = u.x_f - 20; // adjust by 20W
-                      id(modbusserver)->write_input_register(18, u.x_int[1]);
-                      id(modbusserver)->write_input_register(19, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase A apparent power %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 20: phase B apparent power
-                      u.x_f = root["b_aprt_power"];
-                      u.x_f = u.x_f - 20; // adjust by 20W
-                      id(modbusserver)->write_input_register(20, u.x_int[1]);
-                      id(modbusserver)->write_input_register(21, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase B apparent power %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 22: phase C apparent power
-                      u.x_f = root["c_aprt_power"];
-                      u.x_f = u.x_f - 20; // adjust by 20W
-                      id(modbusserver)->write_input_register(22, u.x_int[1]);
-                      id(modbusserver)->write_input_register(23, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase C apparent power %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
+          float voltages[3], currents[3], powers[3];
+          float total_energy_value = 0;
+          for (int i = 0; i < 3; i++) {
+            voltages[i] = emeters[i]["voltage"].as<float>();
+            currents[i] = emeters[i]["current"].as<float>();
+            powers[i] = emeters[i]["power"].as<float>();
+            total_energy_value += emeters[i]["total"].as<float>() / 1000.0f;
+          }
 
-                      // register 24: phase A reactive power
-                      // register 26: phase B reactive power
-                      // register 28: phase C reactive power
+          // Neue Direktübernahme der Gesamtwirkleistung aus der API
+          float total_power_value = doc["total_power"].as<float>();
+          id(last_total_power) = total_power_value;
 
-                      // Calculate power factor according to IEC
-                      float act_power;
-                      float aprt_power;
-                      
-                      // register 30: phase A power factor
-                      // u.x_f = root["a_pf"];
-                      act_power = root["a_act_power"];
-                      aprt_power = root["a_aprt_power"];
-                      u.x_f = act_power / aprt_power;
-                      id(modbusserver)->write_input_register(30, u.x_int[1]);
-                      id(modbusserver)->write_input_register(31, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase A power factor %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 32: phase B power factor
-                      // u.x_f = root["b_pf"];
-                      act_power = root["b_act_power"];
-                      aprt_power = root["b_aprt_power"];
-                      u.x_f = act_power / aprt_power;
-                      id(modbusserver)->write_input_register(32, u.x_int[1]);
-                      id(modbusserver)->write_input_register(33, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase B power factor %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 34: phase C power factor
-                      // u.x_f = root["c_pf"];
-                      act_power = root["c_act_power"];
-                      aprt_power = root["c_aprt_power"];
-                      u.x_f = act_power / aprt_power;
-                      id(modbusserver)->write_input_register(34, u.x_int[1]);
-                      id(modbusserver)->write_input_register(35, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for phase C power factor %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
+          id(voltage_l1).publish_state(voltages[0]);
+          id(voltage_l2).publish_state(voltages[1]);
+          id(voltage_l3).publish_state(voltages[2]);
+          id(current_l1).publish_state(currents[0]);
+          id(current_l2).publish_state(currents[1]);
+          id(current_l3).publish_state(currents[2]);
+          id(active_power_l1).publish_state(powers[0]);
+          id(active_power_l2).publish_state(powers[1]);
+          id(active_power_l3).publish_state(powers[2]);
+          id(total_energy).publish_state(total_energy_value);
+          id(frequency).publish_state(50.0f);
+          id(total_active_power).publish_state(total_power_value);
 
-                      // register 48: Sum of line currents
-                      u.x_f = root["total_current"];
-                      id(modbusserver)->write_input_register(48, u.x_int[1]);
-                      id(modbusserver)->write_input_register(49, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for Sum of line currents %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 52: Total system power
-                      u.x_f = root["total_act_power"];
-                      id(modbusserver)->write_input_register(52, u.x_int[1]);
-                      id(modbusserver)->write_input_register(53, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for Total system power %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                      // register 56: Total system volt amps
-                      u.x_f = root["total_aprt_power"];
-                      id(modbusserver)->write_input_register(56, u.x_int[1]);
-                      id(modbusserver)->write_input_register(57, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for Total system volt amps %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
+          union {
+            uint16_t reg[2];
+            float value;
+          } converter;
+          
+          auto update_if_changed = [&](float new_val, float& last_val, uint16_t reg_addr) {
+            bool send_all = (id(modbus_send_mode) == "Alles senden");
+            if (send_all || (new_val != last_val)) {
+              last_val = new_val;
+              converter.value = new_val;
+              id(modbusserver)->write_input_register(reg_addr, converter.reg[1]);
+              id(modbusserver)->write_input_register(reg_addr+1, converter.reg[0]);
+            }
+          };
 
-                      // register 70: Frequency of supply voltages
-                      u.x_f = root["a_freq"];
-                      id(modbusserver)->write_input_register(70, u.x_int[1]);
-                      id(modbusserver)->write_input_register(71, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for Frequency of supply voltages %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
+          update_if_changed(voltages[0], id(last_v1), 0x0000);
+          update_if_changed(voltages[1], id(last_v2), 0x0002);
+          update_if_changed(voltages[2], id(last_v3), 0x0004);
+          update_if_changed(currents[0], id(last_c1), 0x0006);
+          update_if_changed(currents[1], id(last_c2), 0x0008);
+          update_if_changed(currents[2], id(last_c3), 0x000A);
+          update_if_changed(powers[0], id(last_p1), 0x000C);
+          update_if_changed(powers[1], id(last_p2), 0x000E);
+          update_if_changed(powers[2], id(last_p3), 0x0010);
+          update_if_changed(50.0f, id(last_freq), 0x0046);
+          update_if_changed(total_energy_value, id(last_total_energy), 0x0156);
 
-                  });
-      - http_request.get:
-          url: http://shellypro3em/rpc/EMData.GetStatus?id=0
-          on_response: 
-            then:
-              - lambda: |-
-                  json::parse_json(id(http_request_data).get_string(), [](JsonObject root) {
-                      // setting modbusserver registers
-                      // use https://www.h-schmidt.net/FloatConverter/IEEE754.html to doublecheck conversions
-
-                      // convert from float to 2 uint16_t. 
-                      union 
-                      {
-                      uint16_t x_int[2];
-                      float x_f;
-                      } u;
-
-                      // register 342: Total kwh
-                      u.x_f = root["total_act"];
-                      id(modbusserver)->write_input_register(342, u.x_int[1]);
-                      id(modbusserver)->write_input_register(343, u.x_int[0]);
-                      ESP_LOGD("read-shelly", "Registers for Total kwh %f set to: 0x%04x and 0x%04x", u.x_f, u.x_int[1], u.x_int[0]);
-                  });
-                  
-                  
+          id(modbus_status).publish_state("Daten aktualisiert");
+          http.end();
