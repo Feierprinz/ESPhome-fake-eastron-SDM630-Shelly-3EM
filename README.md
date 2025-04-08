@@ -25,8 +25,8 @@ Perfect for integration into home automation or energy monitoring systems design
 # Original Modbus - Dateien: https://github.com/hankipanky/esphome-fake-eastron-SDM630/blob/master/esphome/components/modbus_server/modbus_server.h und 
 # https://github.com/hankipanky/esphome-fake-eastron-SDM630/blob/master/esphome/components/modbus_server/modbus_server.cpp
 # Original Github basiert auf ESPHome 2024.5 und einem Shelly 3EM Pro, dieses Projekt hier auf ESPHome 2025.3.3 und einem Shelly 3EM
-# Folgender ESP wird verwendet: https://www.amazon.de/dp/B0D86Q1RJ2
-# Folgender RS485-Adapter: https://www.amazon.de/dp/B099DRKBGQ
+# Folgender ESP wird verwendet: https://amzn.to/4coLhZm
+# Folgender RS485-Adapter: https://amzn.to/3R5zpBN
 ##################################
 ## Goal
 
