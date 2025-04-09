@@ -34,6 +34,11 @@ external_components:
     components: [modbus_server]
 
 globals:
+  - id: error_fix_enabled
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
   - id: modbus_send_mode
     type: std::string
     restore_value: yes
@@ -299,6 +304,26 @@ switch:
 
 select:
   - platform: template
+    name: "401-Error-Fix"
+    id: error_fix_select
+    icon: "mdi:connection"
+    options:
+      - "ON"
+      - "OFF"
+    entity_category: config
+    lambda: |-
+      if(id(error_fix_enabled)) {
+        return std::string("ON");
+      } else {
+        return std::string("OFF");
+      }
+    set_action:
+      then:
+        - lambda: |-
+            id(error_fix_enabled) = (x == std::string("ON"));
+            id(modbus_status).publish_state("401-Fix: " + x + " - Neustart empfohlen");
+
+  - platform: template
     name: "Modbus Sendemodus"
     id: modbus_send_mode_select
     icon: "mdi:transfer"
@@ -427,8 +452,9 @@ interval:
   - interval: 30s
     then:
       - lambda: |-
-          if (id(last_valid_response) > 0 && 
-              (millis() - id(last_valid_response)) > 120000) {
+          if(id(error_fix_enabled) && 
+             id(last_valid_response) > 0 && 
+             (millis() - id(last_valid_response)) > 120000) {
             id(uart_timeout_counter) += 1;
             id(watchdog_active).publish_state(true);
             id(intmodbus).load_settings();
